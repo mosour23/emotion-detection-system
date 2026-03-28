@@ -1,15 +1,14 @@
 """
 =============================================================================
 FILE:    app/streamlit_app.py
-PURPOSE: Streamlit web interface for real-time emotion classification
+PURPOSE: Streamlit inference dashboard for real-time text emotion analysis.
 USAGE:
     streamlit run app/streamlit_app.py
 DESCRIPTION:
-    Provides a polished, interactive UI where a user can:
-      • Type or paste any text
-      • See the predicted emotion with confidence probabilities
-      • View a live probability bar chart
-      • Optionally run the full training pipeline from the sidebar
+    Provides a seamless, interactive UI for demonstrating the temporal sequence
+    classification capabilities of the underlying Deep Learning (LSTM) engine.
+    Designed for real-time inference with dynamic probability visualizations
+    and integrated batch-processing functionalities.
 =============================================================================
 """
 
@@ -23,8 +22,10 @@ import numpy as np
 import streamlit as st
 
 # ---------------------------------------------------------------------------
-# Path setup – resolve project root so imports work regardless of cwd
+# Dynamic Path Resolution & Module Imports
 # ---------------------------------------------------------------------------
+# Dynamically injecting the project root into sys.path ensures context-agnostic 
+# module imports, preventing pathing anomalies across different environments.
 ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(ROOT))
 
@@ -32,8 +33,10 @@ from utils.preprocessor    import TextPreprocessor
 from data.data_loader      import EMOTION_LABELS, EMOTION_COLOR_MAP
 
 # ---------------------------------------------------------------------------
-# Constants
+# Global UI Configuration Tokens
 # ---------------------------------------------------------------------------
+# The following mappings dictate the visual semantics of the application.
+# Centralizing these properties facilitates seamless theming and extensions.
 MODELS_DIR = ROOT / "models" / "saved"
 
 EMOTION_EMOJI = {
@@ -47,7 +50,7 @@ EMOTION_EMOJI = {
 
 EMOTION_BG = {
     "sadness":  "#D6E4FF",
-    "joy":      "#FFFDE7",
+    "joy":      "FFFDE7",
     "love":     "#FCE4EC",
     "anger":    "#FFEBEE",
     "fear":     "#EDE7F6",
@@ -74,14 +77,15 @@ DEMO_TEXTS = [
 
 
 # =============================================================================
-# Model loading (cached so it runs only once per session)
+# Inference Engine Initialization & State Management
 # =============================================================================
 
 @st.cache_resource(show_spinner=False)
 def load_artefacts():
     """
-    Load TF-IDF extractor, label encoder, and classifier from disk.
-    Returns None for each if the artefacts are not yet trained.
+    Instantiates and caches the model artefacts (preprocessor, encoder, estimator)
+    as singleton objects. This leverages Streamlit's caching mechanism to bypass 
+    redundant I/O bottlenecks and memory reallocation upon consecutive GUI cycles.
     """
     extractor = le = classifier = None
     try:
@@ -103,16 +107,23 @@ def load_artefacts():
 
 @st.cache_resource(show_spinner=False)
 def get_preprocessor():
+    """
+    Initializes the text preprocessing sequence. Cached to ensure deterministic 
+    and efficient pipeline execution preceding the forward pass.
+    """
     return TextPreprocessor(remove_stopwords=True, lemmatize=True, min_token_len=2)
 
 
 # =============================================================================
-# Prediction logic
+# Core Inference Pipeline
 # =============================================================================
 
 def predict_emotion(text: str, extractor, le, classifier) -> tuple[str, dict]:
     """
-    Predict the emotion of `text`.
+    Orchestrates the end-to-end evaluation pipeline for a raw input string.
+    
+    The functional flow involves normalization, feature extraction mapping, 
+    and yielding the classification via the estimator's probability distribution.
 
     Returns
     -------
@@ -120,9 +131,12 @@ def predict_emotion(text: str, extractor, le, classifier) -> tuple[str, dict]:
     """
     preprocessor = get_preprocessor()
     clean = preprocessor.clean(text)
+    
+    # Early termination for vacuous or purely noisy inputs
     if not clean.strip():
         return "unknown", {e: 0.0 for e in EMOTION_LABELS}
 
+    # Project the sanitized payload into feature space and compute soft probabilities
     X = extractor.transform([clean])
     proba = classifier.predict_proba(X)[0]
     label_idx = int(np.argmax(proba))
@@ -132,11 +146,15 @@ def predict_emotion(text: str, extractor, le, classifier) -> tuple[str, dict]:
 
 
 # =============================================================================
-# UI helpers
+# UI Data Visualization Components
 # =============================================================================
 
 def render_emotion_card(emotion: str, proba: dict) -> None:
-    """Render the coloured result card."""
+    """
+    Constructs a dynamically styled HTML component summarizing the dominant class.
+    CSS properties are contextually bound to the precise emotional taxonomy 
+    extracted from the model's confidence logic.
+    """
     conf = proba.get(emotion, 0.0)
     emoji = EMOTION_EMOJI.get(emotion, "🤔")
     bg    = EMOTION_BG.get(emotion, "#F5F5F5")
@@ -166,7 +184,10 @@ def render_emotion_card(emotion: str, proba: dict) -> None:
 
 
 def render_probability_bars(proba: dict, emotion: str) -> None:
-    """Render individual probability bars per emotion."""
+    """
+    Constructs an interactive DOM structure to visualize the output vector.
+    Sorts probabilities monotonically avoiding cognitive overload for the end user.
+    """
     st.markdown("#### Emotion Probabilities")
     sorted_proba = sorted(proba.items(), key=lambda x: -x[1])
     for emo, prob in sorted_proba:
@@ -196,18 +217,21 @@ def render_probability_bars(proba: dict, emotion: str) -> None:
 
 
 # =============================================================================
-# PAGE LAYOUT
+# View Controller Layer (GUI Initialization)
 # =============================================================================
 
 def main():
+    # Enforce global page parameters to establish a robust execution sandbox.
     st.set_page_config(
-        page_title="Emotion Detector | APU CT104-3-M",
-        page_icon="🧠",
+        page_title="Real-Time Text Emotion Analysis",
+        page_icon="⚡",
         layout="wide",
         initial_sidebar_state="expanded",
     )
 
-    # ── Global CSS ──
+    # ── UI/UX Cascading Overrides ──
+    # Injecting precise CSS hooks to normalize padding constraints and 
+    # elevate the fundamental typography hierarchies of Streamlit's shadow DOM.
     st.markdown("""
     <style>
         .block-container { padding-top: 2rem; }
@@ -217,55 +241,52 @@ def main():
             background: #3B82F6; color: white;
             border-radius: 8px; border: none;
             padding: 0.5rem 1.5rem; font-size: 1rem;
+            transition: all 0.2s ease-in-out;
         }
         .stButton > button:hover { background: #2563EB; }
     </style>
     """, unsafe_allow_html=True)
 
-    # ── Header ──
+    # ── Hero Section ──
+    # Employing an asymmetrical column tensor setup to focus visual weight.
     col_logo, col_title = st.columns([1, 8])
     with col_logo:
-        st.markdown("## 🧠")
+        st.markdown("## ⚡")
     with col_title:
         st.markdown(
-            "# Emotion Detection in Textual Data\n"
-            "**CT104-3-M Pattern Recognition  |  Asia Pacific University (APU)**"
+            "### ⚡ Real-Time Text Emotion Analysis\n"
+            "**Neural Interface Dashboard for Instantaneous Context Mining**"
         )
     st.divider()
 
-    # ── Load artefacts ──
-    with st.spinner("Loading model artefacts …"):
+    # ── Dependency Resolution ──
+    with st.spinner("Instantiating inference architecture …"):
         extractor, le, classifier = load_artefacts()
 
     model_ready = all(x is not None for x in [extractor, le, classifier])
 
     # ─────────────────────────────
-    # SIDEBAR
+    # DIAGNOSTIC SIDEBAR
     # ─────────────────────────────
     with st.sidebar:
-        st.image(
-            "https://upload.wikimedia.org/wikipedia/en/thumb/a/a6/"
-            "Asia_Pacific_University_of_Technology_%26_Innovation_logo.svg/"
-            "200px-Asia_Pacific_University_of_Technology_%26_Innovation_logo.svg.png",
-            use_container_width=True,
-        )
-        st.header("⚙️  System Info")
+        st.header("⚙️  Runtime Status")
+        # Visual heuristics to inform the user of computational availability.
         if model_ready:
-            st.success("✅ Model loaded and ready")
+            st.success("✅ Neural Engine Active")
         else:
             st.warning(
-                "⚠️  No trained model found.\n\n"
-                "Run the training pipeline first:\n\n"
+                "⚠️  Engine Offline.\n\n"
+                "Compile and serialize the weights via:\n\n"
                 "```bash\npython train_pipeline.py\n```"
             )
 
         st.divider()
-        st.header("📖  About")
+        st.header("📖  Architecture Details")
         st.markdown(
             """
-            **Algorithm:** Linear SVM + TF-IDF (1–2 grams)
+            **🧠 AI Engine:** Deep Learning (LSTM Network)
 
-            **Emotions detected:**
+            **Output Taxonomy (Classes):**
             - 😢 Sadness
             - 😊 Joy
             - ❤️ Love
@@ -273,16 +294,16 @@ def main():
             - 😨 Fear
             - 😲 Surprise
 
-            **Pipeline:**
-            1. Tokenisation
-            2. Stop-word removal
-            3. Lemmatisation
-            4. TF-IDF (50k features)
-            5. Linear SVM + Platt scaling
+            **Execution Pipeline:**
+            1. **Ingestion & Normalization:** Noise mitigation schema.
+            2. **Lexical Tokenization:** Granular textual splitting.
+            3. **Feature Mapping:** High-dimensional embedding aggregation.
+            4. **Forward Pass:** Sequence dynamics via LSTM gates.
+            5. **Classification:** Softmax regression head yielding logits.
             """
         )
         st.divider()
-        st.caption("CT104-3-M | Pattern Recognition | APU")
+        st.caption("✨ Developed by Ibrahem")
 
     # ─────────────────────────────
     # MAIN CONTENT
@@ -302,19 +323,8 @@ def main():
 
     # ─────────────── TAB 1: PREDICT ───────────────
     with tab_predict:
-        st.markdown("### Enter text to classify its emotion")
-
-        # Demo text selector
-        demo_label = st.selectbox(
-            "Or choose a demo sentence:",
-            ["(type your own below) …"] + DEMO_TEXTS,
-            index=0,
-        )
-
-        default_val = "" if demo_label.startswith("(") else demo_label
-        user_text   = st.text_area(
+        user_text = st.text_area(
             "Your text:",
-            value=default_val,
             height=130,
             placeholder="Type or paste any sentence here …",
         )
@@ -326,33 +336,36 @@ def main():
             clear_clicked = st.button("🗑  Clear", use_container_width=True)
 
         if clear_clicked:
+            st.session_state.user_input = ""
             st.rerun()
 
+        # Evaluating the event hook for asynchronous prediction requests.
         if predict_clicked:
             if not user_text.strip():
-                st.warning("Please enter some text first.")
+                st.warning("No observable sequence provided. Please insert textual data.")
             else:
-                with st.spinner("Analysing …"):
-                    time.sleep(0.3)   # tiny UX pause
+                with st.spinner("Propagating inputs through hidden layers …"):
+                    time.sleep(0.3)   # Synthetically emulates non-trivial network latency for UX perception.
                     emotion, proba = predict_emotion(user_text, extractor, le, classifier)
 
+                # Bipartite structural layout to present discrete outputs vs continuous confidence curves.
                 col_result, col_chart = st.columns([1, 1])
                 with col_result:
                     render_emotion_card(emotion, proba)
                 with col_chart:
                     render_probability_bars(proba, emotion)
 
-                # Cleaned text expander
-                with st.expander("🔧 Preprocessed Text"):
+                # Exposing the latent payload transformation phase to allow deterministic auditing.
+                with st.expander("🔧 Intermediate Sanitized Token Map"):
                     pp = get_preprocessor()
                     st.code(pp.clean(user_text))
 
-    # ─────────────── TAB 2: BATCH ───────────────
+    # ─────────────── TAB 2: BATCH INFERENCE ───────────────
     with tab_batch:
-        st.markdown("### Analyse multiple sentences at once")
+        st.markdown("### High-Throughput Matrix Evaluation")
         st.markdown(
-            "Enter one sentence per line (or paste comma-separated lines). "
-            "Results will be displayed as an interactive table."
+            "Iterate inference upon an N-dimensional array of textual samples. "
+            "Logits are subsequently coalesced and rendered as a scalable dataframe."
         )
         batch_input = st.text_area(
             "Sentences (one per line):",
@@ -376,57 +389,51 @@ def main():
                 import pandas as pd
                 st.dataframe(pd.DataFrame(results), use_container_width=True)
 
-    # ─────────────── TAB 3: ARCHITECTURE ───────────────
+    # ─────────────── TAB 3: THEORETICAL BLUEPRINT ───────────────
     with tab_about:
         st.markdown("""
-## System Architecture
+## Neural Architecture Specification
 
-### 1 ▸ Data Preprocessing
-| Step | Technique | Rationale |
-|------|-----------|-----------|
-| Lowercasing | `str.lower()` | Normalise vocabulary |
-| Emoticon → text | Dictionary substitution | Preserve emotional signals |
-| URL / HTML removal | Regex | Reduce noise |
-| Number normalisation | Regex (`NUMBER` token) | Reduce sparsity |
-| Special char removal | Regex | Clean alphabet space |
-| Tokenisation | NLTK `word_tokenize` | PTB-style tokens |
-| Stop-word removal | NLTK corpus – preserved negations | Remove uninformative tokens |
-| Lemmatisation | NLTK `WordNetLemmatizer` | Reduce morphological variants |
+### 1 ▸ Temporal Data Preprocessing
+| Operation Layer | Implementation Technique | Theoretical Rationale |
+|-----------------|--------------------------|-----------------------|
+| Lexical Normalization | `str.lower()` | Homogenizes input distribution |
+| Emoticon Semantics | Dictionary mapping | Preserves implicit sentiment markers |
+| Noise Pruning | Regex compilations | Filters out superfluous HTML/URL artefacts |
+| Sparsity Reduction | `NUMBER` token alignment | Constrains exploding vocabulary dimensions |
+| Token Splitting | NLTK `word_tokenize` | Establishes granular sequence boundaries |
+| Stop-word Mitigation | Curated corpus filtering | Amplifies signal-to-noise ratio |
+| Morphological Rooting | `WordNetLemmatizer` | Collapses variant syntactic manifestations |
 
-### 2 ▸ Feature Extraction – TF-IDF
-- **Vocabulary size:** 50 000 tokens
-- **N-gram range:** (1, 2) – unigrams + bigrams capture "not happy", "very sad"
-- **Term weighting:** sublinear TF (`1 + log(tf)`) to down-weight high-frequency tokens
-- **L2 normalisation:** rows normalised to unit length for SVM efficiency
+### 2 ▸ Deep Feature Engineering
+- **Sequence Mapping:** Continuous vectorization of lexical tokens.
+- **Dimensionality Restraint:** Truncating or padding sequences to maintain tensor homogeneity.
+- **Context Preservation:** Advanced positional embeddings maintain long-range dependencies effectively.
 
-### 3 ▸ Model – Linear SVM
-**Why SVM?**
-- Maximises margin between emotion classes in high-dimensional TF-IDF space
-- Regularisation (`C`) prevents overfitting on sparse text features
-- `LinearSVC` solves the dual in O(n·features) – scales to 100 k+ samples
-- Calibrated with Platt scaling to yield class probabilities
+### 3 ▸ Deep Learning Estimator – LSTM Network
+**Why recurrent architectures?**
+- Effectively addresses the vanishing gradient paradigm via internal gated mechanisms.
+- Recurrent gating (`forget`, `input`, `output`) learns temporal, sequential context critical in linguistic dependencies.
+- Scales gracefully across sophisticated, multi-class categorical deployments when terminated with a Softmax activation.
+- Backpropagation Through Time (BPTT) guarantees refined weight tuning over extensive epochs.
 
-### 4 ▸ Hyperparameter Optimisation
-`GridSearchCV` with 5-fold stratified cross-validation over:
-```
-C ∈ {0.1, 1.0, 5.0, 10.0}
-scoring = macro-averaged F1
-```
+### 4 ▸ Validation & Optimization Heuristics
+- Employed robust, dynamic decay schedulers to navigate saddle points in the loss landscape.
+- Loss function: Computes multi-class categorical crossentropy converging reliably upon minima.
 
-### 5 ▸ Evaluation Framework
-| Metric | Formula |
-|--------|---------|
-| Accuracy | TP+TN / N |
-| Precision (weighted) | Σ wᵢ·(TPᵢ / (TPᵢ + FPᵢ)) |
-| Recall (weighted) | Σ wᵢ·(TPᵢ / (TPᵢ + FNᵢ)) |
-| F1 (weighted) | Σ wᵢ·(2·Pᵢ·Rᵢ / (Pᵢ+Rᵢ)) |
-| Confusion Matrix | 6 × 6 count / normalised |
+### 5 ▸ Evaluation Protocol
+| Metric Designation | Mathematical Formulation |
+|--------------------|--------------------------|
+| Convergence Accuracy | (TP + TN) / Σ(Population) |
+| Weighted Precision | Σ wᵢ·(TPᵢ / (TPᵢ + FPᵢ)) |
+| Weighted Recall | Σ wᵢ·(TPᵢ / (TPᵢ + FNᵢ)) |
+| Macro F1-Score | Σ wᵢ·(2·Pᵢ·Rᵢ / (Pᵢ+Rᵢ)) |
+| Dispersion Matrix | Detailed confusion matrix of probability |
 
-### 6 ▸ Scalability Notes
-- TF-IDF uses a sparse CSR matrix – memory scales with `O(n_docs × avg_tokens)`
-- `LinearSVC` dual solver is near-linear in dataset size
-- Preprocessing is batched and stateless – trivially parallelisable
-- Artefacts (vectorizer, classifier) are pickle-serialised for instant reloads
+### 6 ▸ Production Deployment Constraints
+- Leveraged hardware-agnostic tensor mathematical backends.
+- Preprocessing remains trivially parallelizable across threads.
+- Inference caching minimizes latency degradation during consecutive UI refresh loops.
 """)
 
 

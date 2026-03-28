@@ -321,22 +321,25 @@ def plot_metrics_summary(
     # ── Top-left: overall metrics ──
     ax1 = fig.add_subplot(gs[0, 0])
     overall = {
-        "Accuracy":  metrics["accuracy"],
-        "Precision": metrics["precision"],
-        "Recall":    metrics["recall"],
-        "F1 (wtd)":  metrics["f1_weighted"],
+        "Accuracy":    metrics["accuracy"],
+        "Precision":   metrics["precision"],
+        "Sensitivity": metrics.get("sensitivity", metrics["recall"]),
+        "Specificity": metrics.get("specificity", 0.0),
+        "Recall":      metrics["recall"],
+        "F1 (wtd)":    metrics["f1_weighted"],
     }
     bars = ax1.bar(
         list(overall.keys()), list(overall.values()),
-        color=["#3498DB", "#2ECC71", "#E67E22", "#9B59B6"],
+        color=["#3498DB", "#2ECC71", "#E67E22", "#E74C3C", "#F39C12", "#9B59B6"],
         edgecolor="white",
     )
     for bar, val in zip(bars, overall.values()):
         ax1.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 0.005,
-                 f"{val:.3f}", ha="center", va="bottom", fontsize=10, fontweight="bold")
+                 f"{val:.3f}", ha="center", va="bottom", fontsize=9, fontweight="bold")
     ax1.set_ylim(0, 1.1)
     ax1.set_title("Overall Metrics", fontweight="bold")
     ax1.set_ylabel("Score")
+    ax1.tick_params(axis="x", rotation=15)
 
     # ── Top-right: per-class F1 ──
     ax2 = fig.add_subplot(gs[0, 1])

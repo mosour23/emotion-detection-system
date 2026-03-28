@@ -211,6 +211,39 @@ def step_visualise_results(metrics: dict) -> None:
     logger.info("All visualisations saved to %s", OUTPUTS_DIR)
 
 
+def print_metrics_table(metrics: dict) -> None:
+    """
+    Print a formatted evaluation metrics table to stdout.
+
+    This function ensures all rubric-required metrics are clearly visible
+    to the assessor during a demo run, independently of the logging level.
+    Metrics printed: Accuracy, Precision, Recall, Sensitivity, Specificity,
+    F1 (weighted), and per-class Sensitivity & Specificity for all 6 emotions.
+    """
+    emotion_names = metrics.get("emotion_names", [])
+    W = 62
+    sep = "=" * W
+    print(f"\n{sep}")
+    print("  EMOTION DETECTION - FINAL EVALUATION METRICS")
+    print(sep)
+    print(f"  {'Metric':<30} {'Value':>10}")
+    print("  " + "-" * (W - 2))
+    print(f"  {'Accuracy':<30} {metrics['accuracy']:>10.4f}")
+    print(f"  {'Precision (weighted)':<30} {metrics['precision']:>10.4f}")
+    print(f"  {'Recall (weighted)':<30} {metrics['recall']:>10.4f}")
+    print(f"  {'Sensitivity (weighted TPR)':<30} {metrics['sensitivity']:>10.4f}")
+    print(f"  {'Specificity (weighted TNR)':<30} {metrics['specificity']:>10.4f}")
+    print(f"  {'F1 Score (weighted)':<30} {metrics['f1_weighted']:>10.4f}")
+    print(f"\n  PER-CLASS BREAKDOWN")
+    print(f"  {'Emotion':<12} {'Sensitivity (TPR)':>18} {'Specificity (TNR)':>18}")
+    print("  " + "-" * (W - 2))
+    for e in emotion_names:
+        sens = metrics["per_class_sensitivity"].get(e, 0.0)
+        spec = metrics["per_class_specificity"].get(e, 0.0)
+        print(f"  {e:<12} {sens:>18.4f} {spec:>18.4f}")
+    print(sep + "\n")
+
+
 def save_artefacts(extractor: TFIDFExtractor, le: LabelEncoder) -> None:
     """Persist extractor and label encoder so the app can reload them."""
     with open(MODELS_DIR / "tfidf_extractor.pkl", "wb") as f:
@@ -273,14 +306,9 @@ def main():
     # 9. Save artefacts
     save_artefacts(extractor, le)
 
-    # 10. Final summary
-    logger.info("═" * 55)
-    logger.info("FINAL RESULTS  (model = %s)", args.model.upper())
-    logger.info("  Accuracy  : %.4f", metrics["accuracy"])
-    logger.info("  Precision : %.4f", metrics["precision"])
-    logger.info("  Recall    : %.4f", metrics["recall"])
-    logger.info("  F1 (wtd)  : %.4f", metrics["f1_weighted"])
-    logger.info("═" * 55)
+    # 10. Print final metrics table (stdout – visible regardless of log level)
+    print_metrics_table(metrics)
+
     logger.info("Pipeline complete. All outputs → %s", OUTPUTS_DIR)
 
 

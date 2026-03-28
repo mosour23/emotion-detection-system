@@ -68,7 +68,7 @@ def _build_svm() -> CalibratedClassifierCV:
     LinearSVC is much faster than SVC(kernel='linear') on large corpora.
     """
     return CalibratedClassifierCV(
-        LinearSVC(max_iter=5_000, random_state=42, C=1.0),
+        LinearSVC(max_iter=5_000, random_state=42, C=1.0, class_weight="balanced"),
         cv=3,
     )
 
@@ -80,9 +80,8 @@ def _build_random_forest() -> RandomForestClassifier:
         min_samples_split=5,
         random_state=42,
         n_jobs=-1,
+        class_weight="balanced"
     )
-
-
 def _build_gradient_boosting() -> GradientBoostingClassifier:
     return GradientBoostingClassifier(
         n_estimators=150,
@@ -235,9 +234,70 @@ class EmotionModelTrainer:
         logger.info("Starting training | model=%s | tune=%s", self.model_name, tune_hyperparams)
         t0 = time.time()
 
-        # Deep learning models bypass GridSearchCV
+        # Deep learning models: manual hyperparameter sweep
+        # (GridSearchCV is not compatible with custom PyTorch wrappers)
         if self.model_name in ["lstm", "gru"]:
-            logger.info("Training %s model (no hyperparameter tuning for DL models)", self.model_name.upper())
+            from sklearn.model_selection import train_test_split as _tts
+            from sklearn.metrics import accuracy_score as _acc
+
+            # ── Hyperparameter candidates ──────────────────────────────────
+            HIDDEN_SIZES  = [64, 128]
+            DROPOUT_RATES = [0.2, 0.3]
+            # ──────────────────────────────────────────────────────────────
+
+            # Hold-out 10% of training data for sweep validation
+            X_tr, X_hv, y_tr, y_hv = _tts(
+                X_train, y_train,
+                test_size=0.10,
+                random_state=42,
+                stratify=y_train,
+            )
+
+            best_val_acc  = -1.0
+            best_config   = {"hidden_size": 128, "dropout": 0.3}  # safe default
+
+            logger.info(
+                "Starting %s hyperparameter sweep | hidden_sizes=%s | dropouts=%s",
+                self.model_name.upper(), HIDDEN_SIZES, DROPOUT_RATES,
+            )
+
+            for hs in HIDDEN_SIZES:
+                for dr in DROPOUT_RATES:
+                    sweep_clf = PyTorchEmotionClassifier(
+                        model_type=self.model_name,
+                        input_size=int(X_tr.shape[1]),
+                        hidden_size=hs,
+                        num_classes=self.classifier.num_classes,
+                        dropout=dr,
+                        epochs=10,    # reduced for sweep speed
+                        batch_size=32,
+                    )
+                    sweep_clf.fit(X_tr, y_tr)
+                    hv_acc = _acc(y_hv, sweep_clf.predict(X_hv))
+                    logger.info(
+                        "  [sweep] hidden=%3d | dropout=%.1f | val_acc=%.4f",
+                        hs, dr, hv_acc,
+                    )
+                    if hv_acc > best_val_acc:
+                        best_val_acc = hv_acc
+                        best_config  = {"hidden_size": hs, "dropout": dr}
+
+            self.best_params = best_config
+            logger.info(
+                "Best %s config: %s | val_acc=%.4f – re-fitting on full training set …",
+                self.model_name.upper(), best_config, best_val_acc,
+            )
+
+            # Re-train with best config on the FULL training set and full epochs
+            self.classifier = PyTorchEmotionClassifier(
+                model_type=self.model_name,
+                input_size=int(X_train.shape[1]),
+                hidden_size=best_config["hidden_size"],
+                num_classes=self.classifier.num_classes,
+                dropout=best_config["dropout"],
+                epochs=20,
+                batch_size=32,
+            )
             self.classifier.fit(X_train, y_train)
         elif tune_hyperparams:
             grid = PARAM_GRIDS.get(self.model_name, {})
@@ -353,9 +413,16 @@ class EmotionModelTrainer:
             specificity = tn / (tn + fp) if (tn + fp) > 0 else 0.0
             per_class_specificity[emotion] = round(float(specificity), 4)
 
-        # Calculate weighted average sensitivity and specificity
-        weighted_sensitivity = np.mean(list(per_class_sensitivity.values()))
-        weighted_specificity = np.mean(list(per_class_specificity.values()))
+        # Calculate class-frequency weighted average sensitivity and specificity
+        # (consistent with sklearn's average="weighted" convention)
+        class_counts = np.bincount(y_test, minlength=len(emotion_names))
+        class_weights = class_counts / class_counts.sum()
+        weighted_sensitivity = sum(
+            per_class_sensitivity[e] * w for e, w in zip(emotion_names, class_weights)
+        )
+        weighted_specificity = sum(
+            per_class_specificity[e] * w for e, w in zip(emotion_names, class_weights)
+        )
 
         metrics = {
             "accuracy":                   round(acc,  4),

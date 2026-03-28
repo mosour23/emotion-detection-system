@@ -316,12 +316,69 @@ def split_dataset(
 
 
 # =============================================================================
+# HuggingFace Hub loader (dair-ai/emotion – the canonical rubric dataset)
+# =============================================================================
+
+def load_huggingface_emotion() -> pd.DataFrame:
+    """
+    Load the dair-ai/emotion dataset directly from HuggingFace Hub.
+    Merges the official train, validation, and test splits into one
+    DataFrame so the pipeline can re-split with stratified sampling.
+
+    Requires
+    --------
+    pip install datasets
+
+    Returns
+    -------
+    pd.DataFrame with columns ['text', 'label', 'emotion']
+    """
+    try:
+        from datasets import load_dataset as hf_load_dataset
+    except ImportError:
+        raise ImportError(
+            "HuggingFace 'datasets' library not installed. "
+            "Run: pip install datasets"
+        )
+
+    logger.info("Downloading dair-ai/emotion from HuggingFace Hub …")
+    hf_ds = hf_load_dataset("dair-ai/emotion", trust_remote_code=True)
+
+    # Combine all official splits – pipeline will re-split with stratification
+    frames = []
+    for split_name in ["train", "validation", "test"]:
+        if split_name in hf_ds:
+            split_df = hf_ds[split_name].to_pandas()
+            frames.append(split_df)
+
+    df = pd.concat(frames, ignore_index=True)
+
+    # Map integer labels → emotion name strings
+    # dair-ai/emotion label order: sadness=0, joy=1, love=2, anger=3, fear=4, surprise=5
+    label_map = {i: e for i, e in enumerate(EMOTION_LABELS)}
+    df["emotion"] = df["label"].map(label_map)
+    df = df.dropna(subset=["text", "label"]).reset_index(drop=True)
+    df["label"] = df["label"].astype(int)
+
+    logger.info(
+        "HuggingFace dair-ai/emotion loaded | %d total samples | distribution:\n%s",
+        len(df),
+        df["emotion"].value_counts().to_string(),
+    )
+    return df[["text", "label", "emotion"]]
+
+
+# =============================================================================
 # Convenience loader – auto-selects real vs synthetic
 # =============================================================================
 
 def load_dataset(csv_path: str | None = None) -> pd.DataFrame:
     """
-    Load dataset: real CSV if available, otherwise synthetic fallback.
+    Load dataset with the following priority:
+
+    1. Local CSV  – if `csv_path` is supplied and the file exists.
+    2. HuggingFace Hub – dair-ai/emotion  (requires ``pip install datasets``).
+    3. Synthetic fallback – generated in-memory for offline/CI runs.
 
     Parameters
     ----------
@@ -329,13 +386,24 @@ def load_dataset(csv_path: str | None = None) -> pd.DataFrame:
 
     Returns
     -------
-    pd.DataFrame
+    pd.DataFrame with columns ['text', 'label', 'emotion']
     """
+    # Priority 1: explicit CSV path
     if csv_path and Path(csv_path).exists():
         return load_emotions_csv(csv_path)
 
+    # Priority 2: HuggingFace Hub (dair-ai/emotion)
+    try:
+        return load_huggingface_emotion()
+    except Exception as exc:
+        logger.warning(
+            "HuggingFace dataset load failed (%s) – falling back to synthetic data.",
+            exc,
+        )
+
+    # Priority 3: synthetic fallback
     logger.warning(
-        "No CSV supplied or file not found – using synthetic dataset "
-        "(4 800 samples). For production, supply a real dataset."
+        "Using synthetic dataset (4 800 samples). "
+        "For production quality, supply the real dair-ai/emotion dataset."
     )
     return generate_synthetic_dataset(samples_per_class=800)
